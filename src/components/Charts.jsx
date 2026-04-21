@@ -1,800 +1,584 @@
-// Charts.jsx - Fixed for Netlify Deployment
-// ========== FIXED VERSION ==========
-
+// Charts.jsx - Time Window Fixed Version
 import { useState, useMemo, useEffect } from "react";
-
 import {
-  Chart as ChartJS,
-  LineElement,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  Tooltip,
-  Legend,
-  Filler,
-} from "chart.js";
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, 
+  CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  ReferenceLine, ComposedChart, Area
+} from 'recharts';
 
-import { Line, Bar } from "react-chartjs-2";
-
-// ========== 🎛️ ALL CONFIGURABLE VARIABLES ==========
-
-// -------------------- CHART DISPLAY SETTINGS --------------------
-const DEFAULT_DURATION = 60;
-const CHART_HEIGHT = 280;
-const POINT_RADIUS = 2;
-const POINT_HOVER_RADIUS = 5;
-const CHART_TENSION = 0.3;
-
-// -------------------- CURRENT THRESHOLDS --------------------
+// ========== 🎛️ CONFIGURABLE VARIABLES ==========
+const DEFAULT_DURATION = 60; // Default to 1 hour
+const CHART_HEIGHT = 320;
 const CURRENT_WARNING_LIMIT = 10;
 const CURRENT_CRITICAL_LIMIT = 13;
-const CURRENT_OVERLOAD_POINT = 12;
-
-// -------------------- TEMPERATURE THRESHOLDS --------------------
 const TEMP_WARNING_LIMIT = 40;
 const TEMP_CRITICAL_LIMIT = 55;
-const TEMP_OVERHEAT_POINT = 45;
-
-// -------------------- FLOW THRESHOLDS --------------------
 const FLOW_DIFF_WARNING = 3.0;
 const FLOW_DIFF_CRITICAL = 5.0;
-
-// -------------------- EFFICIENCY THRESHOLDS --------------------
-const EFFICIENCY_GOOD = 0.8;
-const EFFICIENCY_WARNING = 0.5;
-const HIGH_CURRENT_THRESHOLD = 10;
-const LOW_FLOW_THRESHOLD = 8;
-
-// -------------------- STATS CARD SETTINGS --------------------
 const SHOW_STATS_CARDS = true;
-const STATS_REFRESH_ANIMATION = true;
-
-// -------------------- ANALYSIS PANEL SETTINGS --------------------
 const DEFAULT_SHOW_ANALYSIS = true;
-const SHOW_SEVERITY_BORDERS = true;
 
-// -------------------- TIME WINDOW OPTIONS --------------------
 const TIME_WINDOWS = [
-  { label: "Last 5 Minutes", value: 5 },
-  { label: "Last 1 Hour", value: 60 },
-  { label: "Last 5 Hours", value: 300 },
-  { label: "Last 10 Hours", value: 600 },
-  { label: "Last 24 Hours", value: 1440 },
-  { label: "Last 7 Days", value: 10080 },
+  { label: "Last 5 Minutes", value: 5, milliseconds: 5 * 60 * 1000 },
+  { label: "Last 15 Minutes", value: 15, milliseconds: 15 * 60 * 1000 },
+  { label: "Last 30 Minutes", value: 30, milliseconds: 30 * 60 * 1000 },
+  { label: "Last 1 Hour", value: 60, milliseconds: 60 * 60 * 1000 },
+  { label: "Last 3 Hours", value: 180, milliseconds: 180 * 60 * 1000 },
+  { label: "Last 6 Hours", value: 360, milliseconds: 360 * 60 * 1000 },
+  { label: "Last 12 Hours", value: 720, milliseconds: 720 * 60 * 1000 },
+  { label: "Last 24 Hours", value: 1440, milliseconds: 1440 * 60 * 1000 },
 ];
 
-// -------------------- CHART COLORS --------------------
 const COLORS = {
   current: "#00f5d4",
-  currentBg: "rgba(0, 245, 212, 0.05)",
   temperature: "#ff6b6b",
-  temperatureBg: "rgba(255, 107, 107, 0.05)",
-  flow1: "rgba(32, 201, 151, 0.7)",
-  flow2: "rgba(132, 94, 247, 0.7)",
+  flow1: "#20c997",
+  flow2: "#845ef7",
+  flowDiff: "#f59f00",
   load: "#339af0",
-  loadBg: "rgba(51, 154, 240, 0.1)",
   tank: "#f59f00",
-  tankBg: "rgba(245, 159, 0, 0.1)",
-  vibration: "#ff4d4f",
-  vibrationBg: "rgba(255, 77, 79, 0.1)",
-  warning: "rgba(255, 193, 7, 0.8)",
-  alert: "red",
-  overheat: "orange",
 };
-
-// -------------------- ALERT MESSAGES --------------------
-const ALERT_MESSAGES = {
-  currentCritical: "CRITICAL: Reduce load immediately!",
-  currentWarning: "High current draw - monitor closely",
-  currentAboveAvg: "Current above average - check for issues",
-  tempCritical: "CRITICAL: Overheating! Check cooling!",
-  tempWarning: "High temperature - check ventilation",
-  tempRising: "Temperature rising - monitor trend",
-  leakageCritical: "MAJOR LEAKAGE suspected! Inspect pipes!",
-  leakageWarning: "Possible leakage - check connections",
-  leakageIncreasing: "Flow difference increasing - monitor",
-  efficiencyCritical: "High current, low flow - Check for blockage!",
-  efficiencyWarning: "Efficiency low - possible wear or blockage",
-  efficiencyLow: "Efficiency below optimal - schedule check",
-};
-
-// ========== REGISTER CHART.JS COMPONENTS (CRITICAL FIX) ==========
-// Register ALL components before using them
-ChartJS.register(
-  LineElement,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  Tooltip,
-  Legend,
-  Filler,
-);
 
 export default function Charts({ data }) {
   const [duration, setDuration] = useState(DEFAULT_DURATION);
   const [showAnalysis, setShowAnalysis] = useState(DEFAULT_SHOW_ANALYSIS);
-  const [isMounted, setIsMounted] = useState(false);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
-  // Fix for hydration/SSR issues with Netlify
+  // Update current time every second for real-time display
   useEffect(() => {
-    setIsMounted(true);
+    const interval = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Safe and sorted data
-  const safeData = useMemo(() => {
-    if (!Array.isArray(data)) return [];
-    return data
-      .map((d) => ({ ...d, TS: Number(d.TS) || 0 }))
-      .filter((d) => d.TS > 0)
-      .sort((a, b) => a.TS - b.TS);
+  // Process data with proper timestamp handling
+  const processedData = useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return [];
+    
+    console.log("Raw data received:", data.length, "points");
+    
+    const processed = data
+      .filter(d => d && d.TS)
+      .map(d => {
+        // Ensure timestamp is a number (handle both string and number)
+        let timestamp = Number(d.TS);
+        if (isNaN(timestamp)) {
+          timestamp = new Date(d.TS).getTime();
+        }
+        
+        // Skip invalid timestamps
+        if (isNaN(timestamp) || timestamp <= 0) return null;
+        
+        // Safe number conversions
+        const current = Number(d.Current) || 0;
+        const temperature = Number(d.Temperature) || 0;
+        const flow1 = Number(d.Flow1) || 0;
+        const flow2 = Number(d.Flow2) || 0;
+        const tankHeight = Number(d.TankHeight) || 0;
+        const vibration = Number(d.Vibration) || 0;
+        
+        // Calculate flow difference
+        const flowDiff = Math.abs(flow1 - flow2);
+        
+        // Calculate load with division by zero protection
+        const load = current > 0 ? (flow1 + flow2) / current : 0;
+        
+        // Create date object for formatting
+        const date = new Date(timestamp);
+        
+        return {
+          timestamp: timestamp,
+          date: date,
+          time: date.toLocaleTimeString([], { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+          }),
+          fullTime: date.toLocaleString(),
+          current: current,
+          temperature: temperature,
+          flow1: flow1,
+          flow2: flow2,
+          flowDiff: flowDiff,
+          tankHeight: tankHeight,
+          vibration: vibration,
+          load: load,
+        };
+      })
+      .filter(d => d !== null)
+      .sort((a, b) => a.timestamp - b.timestamp);
+    
+    console.log("Processed data:", processed.length, "points");
+    if (processed.length > 0) {
+      console.log("Time range:", new Date(processed[0].timestamp), "to", new Date(processed[processed.length-1].timestamp));
+    }
+    
+    return processed;
   }, [data]);
 
-  // Show loading state while mounting
-  if (!isMounted) {
+  // FIXED: Filter data by selected time window
+  const filteredData = useMemo(() => {
+    if (processedData.length === 0) return [];
+    
+    // Get the latest timestamp from data (not current system time)
+    const latestDataTimestamp = processedData[processedData.length - 1].timestamp;
+    
+    // Calculate cutoff time based on selected duration
+    const cutoffTime = latestDataTimestamp - (duration * 60 * 1000);
+    
+    console.log("Filtering - Duration:", duration, "minutes");
+    console.log("Latest data time:", new Date(latestDataTimestamp));
+    console.log("Cutoff time:", new Date(cutoffTime));
+    
+    // Filter data points within the time window
+    const filtered = processedData.filter(d => d.timestamp >= cutoffTime);
+    
+    console.log("Filtered data points:", filtered.length, "out of", processedData.length);
+    
+    return filtered;
+  }, [processedData, duration]);
+
+  // Calculate statistics for display
+  const stats = useMemo(() => {
+    if (filteredData.length === 0) return {};
+    
+    const latest = filteredData[filteredData.length - 1];
+    const avgCurrent = filteredData.reduce((sum, d) => sum + d.current, 0) / filteredData.length;
+    const maxCurrent = Math.max(...filteredData.map(d => d.current));
+    const minCurrent = Math.min(...filteredData.map(d => d.current));
+    
+    const avgTemp = filteredData.reduce((sum, d) => sum + d.temperature, 0) / filteredData.length;
+    const maxTemp = Math.max(...filteredData.map(d => d.temperature));
+    const minTemp = Math.min(...filteredData.map(d => d.temperature));
+    
+    const avgFlowDiff = filteredData.reduce((sum, d) => sum + d.flowDiff, 0) / filteredData.length;
+    const maxFlowDiff = Math.max(...filteredData.map(d => d.flowDiff));
+    
+    const avgLoad = filteredData.reduce((sum, d) => sum + d.load, 0) / filteredData.length;
+    
+    return { 
+      latest, 
+      avgCurrent, maxCurrent, minCurrent,
+      avgTemp, maxTemp, minTemp,
+      avgFlowDiff, maxFlowDiff,
+      avgLoad,
+      dataPoints: filteredData.length,
+      timeRange: {
+        start: filteredData[0]?.date,
+        end: filteredData[filteredData.length - 1]?.date
+      }
+    };
+  }, [filteredData]);
+
+  // Show loading state
+  if (processedData.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 bg-gray-900 rounded-xl">
+      <div className="flex items-center justify-center h-96 bg-gray-900 rounded-xl">
         <div className="text-center text-gray-400">
-          <div className="text-4xl mb-2">📊</div>
-          <p>Loading dashboard...</p>
+          <div className="text-6xl mb-4">📊</div>
+          <p className="text-lg">No Data Available</p>
+          <p className="text-sm mt-2">Waiting for sensor data...</p>
         </div>
       </div>
     );
   }
 
-  if (safeData.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64 bg-gray-900 rounded-xl">
-        <div className="text-center text-gray-400">
-          <div className="text-4xl mb-2">📊</div>
-          <p>No Data Available</p>
-          <p className="text-sm mt-1">Waiting for sensor data...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const now = safeData[safeData.length - 1].TS;
-  const filteredData = safeData.filter(
-    (d) => now - d.TS <= duration * 60 * 1000,
-  );
-
+  // Show message if no data in selected time window
   if (filteredData.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 bg-gray-900 rounded-xl">
+      <div className="flex items-center justify-center h-96 bg-gray-900 rounded-xl">
         <div className="text-center text-gray-400">
-          <div className="text-4xl mb-2">⏱️</div>
-          <p>No data in selected time window</p>
-          <p className="text-sm mt-1">Try increasing the time range</p>
+          <div className="text-6xl mb-4">⏱️</div>
+          <p className="text-lg">No data in selected time window</p>
+          <p className="text-sm mt-2">Try increasing the time range</p>
+          <button 
+            onClick={() => setDuration(1440)}
+            className="mt-4 px-4 py-2 bg-blue-500/20 rounded-lg text-blue-400 text-sm"
+          >
+            Show Last 24 Hours
+          </button>
         </div>
       </div>
     );
   }
 
-  const labels = filteredData.map((d) => {
-    const date = new Date(d.TS);
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  });
-
-  const get = (key) => filteredData.map((d) => Number(d[key]) || 0);
-
-  const insights = calculateInsights(filteredData);
-
-  const load = filteredData.map(
-    (d) =>
-      (Number(d.Flow1 || 0) + Number(d.Flow2 || 0)) / (Number(d.Current) || 1),
-  );
-
-  const currentData = get("Current");
-  const tempData = get("Temperature");
-
-  const overloadPoints = currentData.map((v) =>
-    v > CURRENT_OVERLOAD_POINT ? v : null,
-  );
-  const overheatPoints = tempData.map((v) =>
-    v > TEMP_OVERHEAT_POINT ? v : null,
-  );
-
-  const chartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: { mode: "index", intersect: false },
-    plugins: {
-      legend: { labels: { color: "#ddd", font: { size: 11 } } },
-      tooltip: {
-        mode: "index",
-        intersect: false,
-        backgroundColor: "rgba(0,0,0,0.8)",
-        callbacks: {
-          label: function (context) {
-            let label = context.dataset.label || "";
-            let value = context.raw;
-            if (value !== null && value !== undefined) {
-              label += `: ${value.toFixed(2)}`;
-              if (context.dataset.label === "Temperature") label += "°C";
-              if (context.dataset.label === "Current") label += "A";
-              if (context.dataset.label?.includes("Flow")) label += " L/min";
-            }
-            return label;
-          },
-        },
-      },
-    },
-    scales: {
-      x: {
-        ticks: { color: "#aaa", maxRotation: 45, minRotation: 45 },
-        grid: { color: "rgba(255,255,255,0.05)" },
-      },
-      y: {
-        ticks: { color: "#aaa" },
-        grid: { color: "rgba(255,255,255,0.05)" },
-      },
-    },
-  };
+  const insights = calculateInsights(filteredData, stats);
 
   return (
-    <div className="space-y-6 bg-gray-900 min-h-screen p-6">
-      {/* Header with Controls */}
-      <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl p-4 backdrop-blur border border-white/10">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <h3 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
-              📈 Real-Time Monitoring Dashboard
-            </h3>
-            <p className="text-gray-400 text-sm mt-1">
-              {filteredData.length} data points | Last update:{" "}
-              {new Date(now).toLocaleTimeString()}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-3">
-            <select
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-              className="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm cursor-pointer hover:bg-gray-700 transition"
-            >
-              {TIME_WINDOWS.map((window) => (
-                <option key={window.value} value={window.value}>
-                  {window.label}
-                </option>
-              ))}
-            </select>
-
-            <button
-              onClick={() => setShowAnalysis(!showAnalysis)}
-              className="px-3 py-2 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 text-sm hover:bg-purple-500/30 transition"
-            >
-              {showAnalysis ? "📊 Hide Analysis" : "🔍 Show Analysis"}
-            </button>
+    <div className="min-h-screen bg-gray-900 p-4 md:p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        
+        {/* Header with Time Window Info */}
+        <div className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-xl p-5 border border-white/10 backdrop-blur">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h3 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">
+                📈 Industrial Monitoring Dashboard
+              </h3>
+              <p className="text-gray-400 text-sm mt-1">
+                Showing {filteredData.length} data points from {stats.timeRange?.start?.toLocaleTimeString()} to {stats.timeRange?.end?.toLocaleTimeString()}
+              </p>
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <select
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm cursor-pointer hover:bg-gray-700 transition"
+              >
+                {TIME_WINDOWS.map(w => (
+                  <option key={w.value} value={w.value}>{w.label}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => setShowAnalysis(!showAnalysis)}
+                className="px-4 py-2 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 text-sm hover:bg-purple-500/30 transition"
+              >
+                {showAnalysis ? "📊 Hide Analysis" : "🔍 Show Analysis"}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Quick Stats Cards */}
-      {SHOW_STATS_CARDS && (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-          <StatCard
-            title="Current"
-            value={`${currentData[currentData.length - 1]?.toFixed(1) || 0}A`}
-            status={
-              currentData[currentData.length - 1] > CURRENT_WARNING_LIMIT
-                ? "warning"
-                : "normal"
-            }
-            icon="⚡"
-            animation={STATS_REFRESH_ANIMATION}
-          />
-          <StatCard
-            title="Temperature"
-            value={`${tempData[tempData.length - 1]?.toFixed(1) || 0}°C`}
-            status={
-              tempData[tempData.length - 1] > TEMP_WARNING_LIMIT
-                ? "warning"
-                : "normal"
-            }
-            icon="🌡️"
-            animation={STATS_REFRESH_ANIMATION}
-          />
-          <StatCard
-            title="Flow1"
-            value={`${get("Flow1")[get("Flow1").length - 1]?.toFixed(1) || 0} L/min`}
-            icon="🚰"
-            animation={STATS_REFRESH_ANIMATION}
-          />
-          <StatCard
-            title="Flow2"
-            value={`${get("Flow2")[get("Flow2").length - 1]?.toFixed(1) || 0} L/min`}
-            icon="💧"
-            animation={STATS_REFRESH_ANIMATION}
-          />
-          <StatCard
-            title="Tank Height"
-            value={`${get("TankHeight")[get("TankHeight").length - 1]?.toFixed(1) || 0}m`}
-            icon="🛢️"
-            animation={STATS_REFRESH_ANIMATION}
-          />
-          <StatCard
-            title="Vibration"
-            value={
-              get("Vibration")[get("Vibration").length - 1] === 1
-                ? "ALERT"
-                : "OK"
-            }
-            status={
-              get("Vibration")[get("Vibration").length - 1] === 1
-                ? "critical"
-                : "normal"
-            }
-            icon="📳"
-            animation={STATS_REFRESH_ANIMATION}
-          />
-        </div>
-      )}
-
-      {/* Analysis Insights Panel */}
-      {showAnalysis && (
-        <div className="bg-gradient-to-r from-green-500/5 to-blue-500/5 rounded-xl p-4 border border-green-500/20">
-          <h4 className="font-bold text-green-400 mb-3 flex items-center gap-2">
-            <span>🔍</span> Real-Time Analysis Insights
-            <span className="text-xs text-gray-500 ml-2">
-              (Thresholds: Current&gt;{CURRENT_WARNING_LIMIT}A | Temp&gt;
-              {TEMP_WARNING_LIMIT}°C)
-            </span>
-          </h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <InsightCard
-              title="Current Status"
-              value={insights.currentStatus?.value || "N/A"}
-              status={insights.currentStatus?.status || "normal"}
-              recommendation={
-                insights.currentStatus?.recommendation || "No data"
-              }
-              icon="⚡"
-              thresholds={`Warning: ${CURRENT_WARNING_LIMIT}A | Critical: ${CURRENT_CRITICAL_LIMIT}A`}
+        {/* Stats Cards */}
+        {SHOW_STATS_CARDS && stats.latest && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            <StatCard 
+              title="Current" 
+              value={`${stats.latest.current.toFixed(1)}A`}
+              subtitle={`Avg: ${stats.avgCurrent?.toFixed(1)}A`}
+              status={stats.latest.current > CURRENT_WARNING_LIMIT ? "warning" : "normal"} 
+              icon="⚡" 
             />
-            <InsightCard
-              title="Temperature Status"
-              value={insights.tempStatus?.value || "N/A"}
-              status={insights.tempStatus?.status || "normal"}
-              recommendation={insights.tempStatus?.recommendation || "No data"}
-              icon="🌡️"
-              thresholds={`Warning: ${TEMP_WARNING_LIMIT}°C | Critical: ${TEMP_CRITICAL_LIMIT}°C`}
+            <StatCard 
+              title="Temperature" 
+              value={`${stats.latest.temperature.toFixed(1)}°C`}
+              subtitle={`Avg: ${stats.avgTemp?.toFixed(1)}°C`}
+              status={stats.latest.temperature > TEMP_WARNING_LIMIT ? "warning" : "normal"} 
+              icon="🌡️" 
             />
-            <InsightCard
-              title="Flow Difference"
-              value={insights.flowDiff?.value || "N/A"}
-              status={insights.flowDiff?.status || "normal"}
-              recommendation={insights.flowDiff?.recommendation || "No data"}
-              icon="💧"
-              thresholds={`Warning: ${FLOW_DIFF_WARNING} L/min | Critical: ${FLOW_DIFF_CRITICAL} L/min`}
+            <StatCard 
+              title="Flow 1 (Inlet)" 
+              value={`${stats.latest.flow1.toFixed(1)} L/min`}
+              subtitle={`Flow 2: ${stats.latest.flow2.toFixed(1)} L/min`}
+              icon="🚰" 
             />
-            <InsightCard
-              title="Pump Efficiency"
-              value={insights.efficiency?.value || "N/A"}
-              status={insights.efficiency?.status || "normal"}
-              recommendation={insights.efficiency?.recommendation || "No data"}
-              icon="⚙️"
-              thresholds={`Good > ${EFFICIENCY_GOOD} | Warning < ${EFFICIENCY_WARNING}`}
+            <StatCard 
+              title="Flow Difference" 
+              value={`${stats.latest.flowDiff.toFixed(1)} L/min`}
+              subtitle={`Max: ${stats.maxFlowDiff?.toFixed(1)} L/min`}
+              status={stats.latest.flowDiff > FLOW_DIFF_WARNING ? "warning" : "normal"}
+              icon="📊" 
+            />
+            <StatCard 
+              title="Tank Level" 
+              value={`${stats.latest.tankHeight.toFixed(1)}m`}
+              icon="🛢️" 
+            />
+            <StatCard 
+              title="Efficiency" 
+              value={`${(stats.latest.load * 100).toFixed(0)}%`}
+              subtitle={`Avg: ${(stats.avgLoad * 100).toFixed(0)}%`}
+              status={stats.latest.load < 0.6 ? "warning" : "normal"}
+              icon="⚙️" 
             />
           </div>
+        )}
+
+        {/* Analysis Panel */}
+        {showAnalysis && (
+          <div className="bg-gradient-to-r from-green-500/5 to-blue-500/5 rounded-xl p-5 border border-green-500/20">
+            <h4 className="font-bold text-green-400 mb-4 flex items-center gap-2">
+              <span className="text-xl">🔍</span> Real-Time Analysis Insights
+              <span className="text-xs text-gray-500 ml-2 font-normal">
+                (Based on {filteredData.length} data points in selected window)
+              </span>
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <InsightCard 
+                title="Current Status" 
+                value={insights.currentStatus?.value || "N/A"}
+                status={insights.currentStatus?.status || "normal"} 
+                message={insights.currentStatus?.message || "No data"} 
+                icon="⚡" 
+              />
+              <InsightCard 
+                title="Temperature Status" 
+                value={insights.tempStatus?.value || "N/A"}
+                status={insights.tempStatus?.status || "normal"} 
+                message={insights.tempStatus?.message || "No data"} 
+                icon="🌡️"
+              />
+              <InsightCard 
+                title="Flow Difference" 
+                value={insights.leakageStatus?.value || "N/A"}
+                status={insights.leakageStatus?.status || "normal"} 
+                message={insights.leakageStatus?.message || "No data"} 
+                icon="💧"
+              />
+              <InsightCard 
+                title="Pump Efficiency" 
+                value={insights.efficiencyStatus?.value || "N/A"}
+                status={insights.efficiencyStatus?.status || "normal"} 
+                message={insights.efficiencyStatus?.message || "No data"} 
+                icon="⚙️"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Charts Grid */}
+        <div className="grid lg:grid-cols-2 gap-6">
+          
+          {/* Current Chart */}
+          <ChartCard title="⚡ Current Draw" unit="Amperes (A)">
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+              <LineChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis 
+                  dataKey="time" 
+                  stroke="#9ca3af" 
+                  tick={{ fontSize: 11 }} 
+                  interval="preserveStartEnd"
+                  angle={duration <= 60 ? 0 : -45}
+                  textAnchor={duration <= 60 ? "middle" : "end"}
+                  height={duration <= 60 ? 30 : 60}
+                />
+                <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
+                  labelFormatter={(label) => `Time: ${label}`}
+                  formatter={(value) => [`${value.toFixed(2)} A`, 'Current']}
+                />
+                <Legend />
+                <ReferenceLine y={CURRENT_WARNING_LIMIT} stroke="#fbbf24" strokeDasharray="5 5" label={{ value: 'Warning', fill: '#fbbf24', fontSize: 10 }} />
+                <ReferenceLine y={CURRENT_CRITICAL_LIMIT} stroke="#ef4444" strokeDasharray="5 5" label={{ value: 'Critical', fill: '#ef4444', fontSize: 10 }} />
+                <Line type="monotone" dataKey="current" stroke={COLORS.current} strokeWidth={2.5} dot={false} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          {/* Temperature Chart */}
+          <ChartCard title="🌡️ Temperature" unit="Degrees Celsius (°C)">
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+              <LineChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
+                  formatter={(value) => [`${value.toFixed(1)} °C`, 'Temperature']}
+                />
+                <Legend />
+                <ReferenceLine y={TEMP_WARNING_LIMIT} stroke="#fbbf24" strokeDasharray="5 5" label={{ value: 'Warning', fill: '#fbbf24', fontSize: 10 }} />
+                <ReferenceLine y={TEMP_CRITICAL_LIMIT} stroke="#ef4444" strokeDasharray="5 5" label={{ value: 'Critical', fill: '#ef4444', fontSize: 10 }} />
+                <Line type="monotone" dataKey="temperature" stroke={COLORS.temperature} strokeWidth={2.5} dot={false} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          {/* Flow Comparison Chart */}
+          <ChartCard title="🚰 Flow Rates Comparison" unit="Liters per Minute (L/min)">
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+              <BarChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
+                  formatter={(value, name) => [`${value.toFixed(1)} L/min`, name]}
+                />
+                <Legend />
+                <Bar dataKey="flow1" fill={COLORS.flow1} name="Flow 1 (Inlet)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="flow2" fill={COLORS.flow2} name="Flow 2 (Outlet)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          {/* Flow Difference Chart */}
+          <ChartCard title="📊 Flow Difference (Leakage Detection)" unit="Liters per Minute (L/min)">
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+              <ComposedChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} domain={[0, 'auto']} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
+                  formatter={(value) => [`${Math.abs(value).toFixed(2)} L/min`, '|Flow1 - Flow2|']}
+                />
+                <Legend />
+                <ReferenceLine y={FLOW_DIFF_WARNING} stroke="#fbbf24" strokeDasharray="5 5" label={{ value: 'Warning', fill: '#fbbf24', fontSize: 10 }} />
+                <ReferenceLine y={FLOW_DIFF_CRITICAL} stroke="#ef4444" strokeDasharray="5 5" label={{ value: 'Critical', fill: '#ef4444', fontSize: 10 }} />
+                <Area type="monotone" dataKey="flowDiff" fill={COLORS.flowDiff} stroke={COLORS.flowDiff} strokeWidth={2} fillOpacity={0.3} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          {/* Pump Load/Efficiency Chart */}
+          <ChartCard title="⚙️ Pump Efficiency" unit="Load Factor (Flow/Current)">
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+              <LineChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} domain={[0, 2]} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
+                  formatter={(value) => [`${value.toFixed(2)}`, 'Efficiency Ratio']}
+                />
+                <Legend />
+                <ReferenceLine y={0.8} stroke="#10b981" strokeDasharray="5 5" label={{ value: 'Good (0.8)', fill: '#10b981', fontSize: 10 }} />
+                <ReferenceLine y={0.5} stroke="#fbbf24" strokeDasharray="5 5" label={{ value: 'Warning (0.5)', fill: '#fbbf24', fontSize: 10 }} />
+                <Line type="monotone" dataKey="load" stroke={COLORS.load} strokeWidth={2.5} dot={false} activeDot={{ r: 6 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          {/* Tank Height Chart */}
+          <ChartCard title="🛢️ Tank Level" unit="Meters (m)">
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+              <ComposedChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} domain={[0, 'auto']} />
+                <Tooltip 
+                  contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
+                  formatter={(value) => [`${value.toFixed(2)} m`, 'Tank Level']}
+                />
+                <Legend />
+                <Area type="monotone" dataKey="tankHeight" fill={COLORS.tank} stroke={COLORS.tank} strokeWidth={2.5} fillOpacity={0.3} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </ChartCard>
         </div>
-      )}
 
-      {/* Charts Grid */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        {/* Current Chart */}
-        <ChartCard
-          title="⚡ Current Draw"
-          subtitle={`Amperes (A) - Warning > ${CURRENT_WARNING_LIMIT}A | Critical > ${CURRENT_CRITICAL_LIMIT}A`}
-          severity="high"
-          showBorder={SHOW_SEVERITY_BORDERS}
-        >
-          <Line
-            data={{
-              labels,
-              datasets: [
-                {
-                  label: "Current",
-                  data: currentData,
-                  borderColor: COLORS.current,
-                  backgroundColor: COLORS.currentBg,
-                  fill: true,
-                  tension: CHART_TENSION,
-                  pointRadius: POINT_RADIUS,
-                  pointHoverRadius: POINT_HOVER_RADIUS,
-                },
-                {
-                  label: `Warning Limit (${CURRENT_WARNING_LIMIT}A)`,
-                  data: new Array(labels.length).fill(CURRENT_WARNING_LIMIT),
-                  borderColor: COLORS.warning,
-                  borderDash: [6, 4],
-                  pointRadius: 0,
-                  fill: false,
-                },
-                {
-                  label: "Overload Events",
-                  data: overloadPoints,
-                  pointBackgroundColor: COLORS.alert,
-                  pointRadius: POINT_HOVER_RADIUS,
-                  pointHoverRadius: POINT_HOVER_RADIUS + 3,
-                  showLine: false,
-                  type: "scatter",
-                },
-              ],
-            }}
-            options={chartOptions}
-          />
-        </ChartCard>
-
-        {/* Temperature Chart */}
-        <ChartCard
-          title="🌡️ Temperature"
-          subtitle={`Degrees Celsius (°C) - Warning > ${TEMP_WARNING_LIMIT}°C | Critical > ${TEMP_CRITICAL_LIMIT}°C`}
-          severity="high"
-          showBorder={SHOW_SEVERITY_BORDERS}
-        >
-          <Line
-            data={{
-              labels,
-              datasets: [
-                {
-                  label: "Temperature",
-                  data: tempData,
-                  borderColor: COLORS.temperature,
-                  backgroundColor: COLORS.temperatureBg,
-                  fill: true,
-                  tension: CHART_TENSION,
-                  pointRadius: POINT_RADIUS,
-                },
-                {
-                  label: `Warning Limit (${TEMP_WARNING_LIMIT}°C)`,
-                  data: new Array(labels.length).fill(TEMP_WARNING_LIMIT),
-                  borderColor: COLORS.warning,
-                  borderDash: [6, 4],
-                  pointRadius: 0,
-                },
-                {
-                  label: "Overheat Events",
-                  data: overheatPoints,
-                  pointBackgroundColor: COLORS.overheat,
-                  pointRadius: POINT_HOVER_RADIUS,
-                  showLine: false,
-                },
-              ],
-            }}
-            options={chartOptions}
-          />
-        </ChartCard>
-
-        {/* Flow Comparison Chart */}
-        <ChartCard
-          title="🚰 Flow Comparison"
-          subtitle={`Flow Rate (L/min) - Leakage warning if difference > ${FLOW_DIFF_WARNING} L/min`}
-          severity="medium"
-          showBorder={SHOW_SEVERITY_BORDERS}
-        >
-          <Bar
-            data={{
-              labels,
-              datasets: [
-                {
-                  label: "Flow 1 (Inlet)",
-                  data: get("Flow1"),
-                  backgroundColor: COLORS.flow1,
-                  borderRadius: 4,
-                },
-                {
-                  label: "Flow 2 (Outlet)",
-                  data: get("Flow2"),
-                  backgroundColor: COLORS.flow2,
-                  borderRadius: 4,
-                },
-              ],
-            }}
-            options={chartOptions}
-          />
-        </ChartCard>
-
-        {/* Load Chart */}
-        <ChartCard
-          title="⚙️ Pump Load"
-          subtitle="Load Factor (Flow/Current) - Higher is better"
-          severity="medium"
-          showBorder={SHOW_SEVERITY_BORDERS}
-        >
-          <Line
-            data={{
-              labels,
-              datasets: [
-                {
-                  label: "Load",
-                  data: load,
-                  borderColor: COLORS.load,
-                  backgroundColor: COLORS.loadBg,
-                  fill: true,
-                  tension: CHART_TENSION,
-                  pointRadius: POINT_RADIUS,
-                },
-              ],
-            }}
-            options={chartOptions}
-          />
-        </ChartCard>
-
-        {/* Tank Height Chart */}
-        <ChartCard
-          title="🛢️ Tank Level"
-          subtitle="Height (meters)"
-          severity="low"
-          showBorder={SHOW_SEVERITY_BORDERS}
-        >
-          <Line
-            data={{
-              labels,
-              datasets: [
-                {
-                  label: "Tank Height",
-                  data: get("TankHeight"),
-                  borderColor: COLORS.tank,
-                  backgroundColor: COLORS.tankBg,
-                  fill: true,
-                  tension: CHART_TENSION,
-                  pointRadius: POINT_RADIUS,
-                },
-              ],
-            }}
-            options={chartOptions}
-          />
-        </ChartCard>
-
-        {/* Vibration Chart */}
-        <ChartCard
-          title="📳 Vibration"
-          subtitle="Status (0=OK, 1=Alert) - Any alert indicates mechanical issue"
-          severity="high"
-          showBorder={SHOW_SEVERITY_BORDERS}
-        >
-          <Line
-            data={{
-              labels,
-              datasets: [
-                {
-                  label: "Vibration",
-                  data: get("Vibration"),
-                  borderColor: COLORS.vibration,
-                  backgroundColor: COLORS.vibrationBg,
-                  stepped: true,
-                  pointRadius: POINT_RADIUS + 1,
-                  pointBorderColor: COLORS.vibration,
-                },
-              ],
-            }}
-            options={chartOptions}
-          />
-        </ChartCard>
-      </div>
-
-      {/* Summary Footer */}
-      <div className="bg-gray-800/50 rounded-xl p-4 text-center text-gray-400 text-xs">
-        <p>
-          ⚠️ Colored markers indicate alert conditions | Dashed lines show
-          warning thresholds | Hover on charts for detailed values
-        </p>
-        <p className="mt-1">
-          ⚙️ Configurable thresholds: Current({CURRENT_WARNING_LIMIT}A) |
-          Temperature({TEMP_WARNING_LIMIT}°C) | Flow Diff({FLOW_DIFF_WARNING}
-          L/min)
-        </p>
+        {/* Footer */}
+        <div className="bg-gray-800/30 rounded-xl p-4 text-center text-gray-400 text-xs border border-gray-700">
+          <p>⚠️ Dashed lines indicate warning thresholds | Hover on charts for detailed values</p>
+          <p className="mt-1">⚙️ Current: {CURRENT_WARNING_LIMIT}A warning | {CURRENT_CRITICAL_LIMIT}A critical | Temp: {TEMP_WARNING_LIMIT}°C warning | Flow Diff: {FLOW_DIFF_WARNING} L/min warning</p>
+        </div>
       </div>
     </div>
   );
 }
 
-// ========== HELPER COMPONENTS ==========
-
-function StatCard({ title, value, status = "normal", icon, animation = true }) {
-  const getStatusColor = () => {
-    switch (status) {
-      case "critical":
-        return "text-red-400 border-red-500/50 bg-red-500/10";
-      case "warning":
-        return "text-yellow-400 border-yellow-500/50 bg-yellow-500/10";
-      default:
-        return "text-green-400 border-green-500/30 bg-green-500/5";
-    }
+// Helper Components
+function StatCard({ title, value, subtitle, status = "normal", icon }) {
+  const statusStyles = {
+    normal: "border-green-500/30 bg-green-500/5",
+    warning: "border-yellow-500/50 bg-yellow-500/10",
+    critical: "border-red-500/50 bg-red-500/10"
   };
-
+  
+  const textStyles = {
+    normal: "text-green-400",
+    warning: "text-yellow-400",
+    critical: "text-red-400"
+  };
+  
   return (
-    <div
-      className={`rounded-xl p-3 border backdrop-blur ${animation ? "transition-all hover:scale-105" : ""} ${getStatusColor()}`}
-    >
+    <div className={`rounded-xl p-3 border backdrop-blur transition-all hover:scale-105 ${statusStyles[status]}`}>
       <div className="flex items-center justify-between">
         <span className="text-2xl">{icon}</span>
-        <span className="text-xs opacity-70">{title}</span>
+        <span className="text-xs text-gray-400">{title}</span>
       </div>
-      <div className="text-xl font-bold mt-1">{value}</div>
+      <div className={`text-xl font-bold mt-1 ${textStyles[status]}`}>{value}</div>
+      {subtitle && <div className="text-xs text-gray-500 mt-1">{subtitle}</div>}
     </div>
   );
 }
 
-function ChartCard({ title, subtitle, severity, children, showBorder = true }) {
-  const getBorderColor = () => {
-    if (!showBorder) return "border-white/10";
-    switch (severity) {
-      case "high":
-        return "border-red-500/30";
-      case "medium":
-        return "border-yellow-500/30";
-      default:
-        return "border-blue-500/30";
-    }
-  };
-
+function ChartCard({ title, unit, children }) {
   return (
-    <div
-      className={`bg-gray-800/30 rounded-xl p-4 border ${getBorderColor()} transition-all hover:shadow-lg`}
-    >
-      <div className="mb-3">
+    <div className="bg-gray-800/20 rounded-xl p-4 border border-gray-700 transition-all hover:shadow-lg hover:shadow-purple-500/5">
+      <div className="mb-3 flex justify-between items-center">
         <h4 className="font-bold text-white">{title}</h4>
-        <p className="text-xs text-gray-400">{subtitle}</p>
+        <p className="text-xs text-gray-500">{unit}</p>
       </div>
-      <div style={{ height: `${CHART_HEIGHT}px` }}>{children}</div>
+      {children}
     </div>
   );
 }
 
-function InsightCard({
-  title,
-  value,
-  status,
-  recommendation,
-  icon,
-  thresholds,
-}) {
-  const getStatusColor = () => {
-    switch (status) {
-      case "critical":
-        return "text-red-400";
-      case "warning":
-        return "text-yellow-400";
-      case "good":
-        return "text-green-400";
-      default:
-        return "text-gray-400";
-    }
+function InsightCard({ title, value, status, message, icon }) {
+  const statusConfig = {
+    critical: { text: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', emoji: '🔴' },
+    warning: { text: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/20', emoji: '⚠️' },
+    good: { text: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', emoji: '✅' },
+    normal: { text: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', emoji: 'ℹ️' }
   };
-
-  const getBgColor = () => {
-    switch (status) {
-      case "critical":
-        return "bg-red-500/10 border-red-500/20";
-      case "warning":
-        return "bg-yellow-500/10 border-yellow-500/20";
-      case "good":
-        return "bg-green-500/10 border-green-500/20";
-      default:
-        return "bg-gray-500/10 border-gray-500/20";
-    }
-  };
-
+  
+  const config = statusConfig[status] || statusConfig.normal;
+  
   return (
-    <div className={`rounded-lg p-3 border ${getBgColor()}`}>
-      <div className="flex items-center gap-2 mb-2">
-        <span>{icon}</span>
-        <span className="text-xs text-gray-300">{title}</span>
-      </div>
-      <div className={`text-lg font-bold ${getStatusColor()}`}>{value}</div>
-      <div className="text-xs text-gray-400 mt-1">{recommendation}</div>
-      {thresholds && (
-        <div className="text-xs text-gray-500 mt-2 font-mono border-t border-gray-700 pt-1">
-          {thresholds}
+    <div className={`rounded-lg p-3 border ${config.bg} ${config.border} transition-all hover:scale-[1.02]`}>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">{icon}</span>
+          <span className="text-xs font-medium text-gray-300">{title}</span>
         </div>
-      )}
+        <span className="text-sm">{config.emoji}</span>
+      </div>
+      <div className={`text-xl font-bold ${config.text} mb-1`}>{value}</div>
+      <div className="text-xs text-gray-400 leading-relaxed">{message}</div>
     </div>
   );
 }
 
-// ========== ANALYSIS CALCULATIONS ==========
-
-function calculateInsights(data) {
-  if (!data.length) return {};
-
-  const latest = data[data.length - 1];
-  const avgCurrent =
-    data.reduce((a, b) => a + (b.Current || 0), 0) / data.length;
-  const avgTemp =
-    data.reduce((a, b) => a + (b.Temperature || 0), 0) / data.length;
-  const avgFlowDiff =
-    data.reduce((a, b) => a + Math.abs((b.Flow1 || 0) - (b.Flow2 || 0)), 0) /
-    data.length;
-
+// Analysis Calculations
+function calculateInsights(data, stats) {
+  if (!data.length || !stats.latest) return {};
+  
+  const latest = stats.latest;
+  const avgCurrent = stats.avgCurrent;
+  const avgTemp = stats.avgTemp;
+  
   // Current Status
-  let currentStatus = {
-    value: `${(latest.Current || 0).toFixed(1)}A`,
-    status: "normal",
-    recommendation: "",
-  };
-  if ((latest.Current || 0) > CURRENT_CRITICAL_LIMIT) {
-    currentStatus.status = "critical";
-    currentStatus.recommendation = ALERT_MESSAGES.currentCritical;
-  } else if ((latest.Current || 0) > CURRENT_WARNING_LIMIT) {
-    currentStatus.status = "warning";
-    currentStatus.recommendation = ALERT_MESSAGES.currentWarning;
-  } else if ((latest.Current || 0) > avgCurrent * 1.2) {
-    currentStatus.status = "warning";
-    currentStatus.recommendation = ALERT_MESSAGES.currentAboveAvg;
+  let currentStatus = { value: `${latest.current.toFixed(1)} A`, status: 'normal', message: 'Current draw within normal range' };
+  if (latest.current > CURRENT_CRITICAL_LIMIT) {
+    currentStatus = { ...currentStatus, status: 'critical', message: 'CRITICAL: Reduce load immediately!' };
+  } else if (latest.current > CURRENT_WARNING_LIMIT) {
+    currentStatus = { ...currentStatus, status: 'warning', message: 'High current draw - monitor closely' };
+  } else if (latest.current > avgCurrent * 1.3 && avgCurrent > 0) {
+    currentStatus = { ...currentStatus, status: 'warning', message: 'Current 30% above average' };
   } else {
-    currentStatus.recommendation = "Current draw normal";
+    currentStatus.message = 'Current normal ✓';
   }
-
+  
   // Temperature Status
-  let tempStatus = {
-    value: `${(latest.Temperature || 0).toFixed(1)}°C`,
-    status: "normal",
-    recommendation: "",
-  };
-  if ((latest.Temperature || 0) > TEMP_CRITICAL_LIMIT) {
-    tempStatus.status = "critical";
-    tempStatus.recommendation = ALERT_MESSAGES.tempCritical;
-  } else if ((latest.Temperature || 0) > TEMP_WARNING_LIMIT) {
-    tempStatus.status = "warning";
-    tempStatus.recommendation = ALERT_MESSAGES.tempWarning;
-  } else if ((latest.Temperature || 0) > avgTemp * 1.15) {
-    tempStatus.status = "warning";
-    tempStatus.recommendation = ALERT_MESSAGES.tempRising;
+  let tempStatus = { value: `${latest.temperature.toFixed(1)} °C`, status: 'normal', message: 'Temperature within normal range' };
+  if (latest.temperature > TEMP_CRITICAL_LIMIT) {
+    tempStatus = { ...tempStatus, status: 'critical', message: 'CRITICAL: Overheating! Check cooling!' };
+  } else if (latest.temperature > TEMP_WARNING_LIMIT) {
+    tempStatus = { ...tempStatus, status: 'warning', message: 'High temperature - check ventilation' };
+  } else if (latest.temperature > avgTemp * 1.2 && avgTemp > 0) {
+    tempStatus = { ...tempStatus, status: 'warning', message: 'Temperature rising trend' };
   } else {
-    tempStatus.recommendation = "Temperature normal";
+    tempStatus.message = 'Temperature normal ✓';
   }
-
-  // Flow Difference (Leakage)
-  const flowDiff = Math.abs((latest.Flow1 || 0) - (latest.Flow2 || 0));
-  let flowStatus = {
-    value: `${flowDiff.toFixed(1)} L/min`,
-    status: "normal",
-    recommendation: "",
-  };
+  
+  // Leakage Status (Flow Difference)
+  const flowDiff = latest.flowDiff;
+  let leakageStatus = { value: `${flowDiff.toFixed(2)} L/min`, status: 'normal', message: 'No leakage detected' };
   if (flowDiff > FLOW_DIFF_CRITICAL) {
-    flowStatus.status = "critical";
-    flowStatus.recommendation = ALERT_MESSAGES.leakageCritical;
+    leakageStatus = { ...leakageStatus, status: 'critical', message: 'CRITICAL: Major leakage suspected!' };
   } else if (flowDiff > FLOW_DIFF_WARNING) {
-    flowStatus.status = "warning";
-    flowStatus.recommendation = ALERT_MESSAGES.leakageWarning;
-  } else if (flowDiff > avgFlowDiff * 1.5) {
-    flowStatus.status = "warning";
-    flowStatus.recommendation = ALERT_MESSAGES.leakageIncreasing;
+    leakageStatus = { ...leakageStatus, status: 'warning', message: 'Possible leakage - check connections' };
   } else {
-    flowStatus.recommendation = "Flow sensors consistent";
+    leakageStatus.message = 'Flow sensors consistent ✓';
   }
-
-  // Pump Efficiency
-  const efficiency =
-    ((latest.Flow1 || 0) + (latest.Flow2 || 0)) / (latest.Current || 0 || 1);
-  let efficiencyStatus = {
-    value: efficiency.toFixed(2),
-    status: "normal",
-    recommendation: "",
-  };
-  if (
-    (latest.Current || 0) > HIGH_CURRENT_THRESHOLD &&
-    (latest.Flow1 || 0) + (latest.Flow2 || 0) < LOW_FLOW_THRESHOLD
-  ) {
-    efficiencyStatus.status = "critical";
-    efficiencyStatus.recommendation = ALERT_MESSAGES.efficiencyCritical;
-  } else if (efficiency < EFFICIENCY_WARNING) {
-    efficiencyStatus.status = "warning";
-    efficiencyStatus.recommendation = ALERT_MESSAGES.efficiencyWarning;
-  } else if (efficiency < EFFICIENCY_GOOD) {
-    efficiencyStatus.status = "warning";
-    efficiencyStatus.recommendation = ALERT_MESSAGES.efficiencyLow;
+  
+  // Efficiency Status
+  const efficiency = latest.load;
+  let efficiencyStatus = { value: efficiency.toFixed(3), status: 'normal', message: 'Pump operating efficiently' };
+  if (efficiency < 0.4) {
+    efficiencyStatus = { ...efficiencyStatus, status: 'critical', message: 'CRITICAL: Check for blockage!' };
+  } else if (efficiency < 0.6) {
+    efficiencyStatus = { ...efficiencyStatus, status: 'warning', message: 'Low efficiency - schedule maintenance' };
+  } else if (efficiency < 0.8) {
+    efficiencyStatus = { ...efficiencyStatus, status: 'warning', message: 'Efficiency below optimal' };
   } else {
-    efficiencyStatus.recommendation = "Pump operating efficiently";
+    efficiencyStatus.message = 'Efficiency good ✓';
   }
-
-  return {
-    currentStatus,
-    tempStatus,
-    flowDiff: flowStatus,
-    efficiency: efficiencyStatus,
-  };
+  
+  return { currentStatus, tempStatus, leakageStatus, efficiencyStatus };
 }
