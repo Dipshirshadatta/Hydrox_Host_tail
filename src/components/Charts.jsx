@@ -1,5 +1,5 @@
-// Charts.jsx - Time Window Fixed Version
-import { useState, useMemo, useEffect } from "react";
+// Charts.jsx - No Time Window, Shows All Data
+import { useState, useMemo } from "react";
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, 
   CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -7,7 +7,6 @@ import {
 } from 'recharts';
 
 // ========== 🎛️ CONFIGURABLE VARIABLES ==========
-const DEFAULT_DURATION = 60; // Default to 1 hour
 const CHART_HEIGHT = 320;
 const CURRENT_WARNING_LIMIT = 10;
 const CURRENT_CRITICAL_LIMIT = 13;
@@ -17,17 +16,6 @@ const FLOW_DIFF_WARNING = 3.0;
 const FLOW_DIFF_CRITICAL = 5.0;
 const SHOW_STATS_CARDS = true;
 const DEFAULT_SHOW_ANALYSIS = true;
-
-const TIME_WINDOWS = [
-  { label: "Last 5 Minutes", value: 5, milliseconds: 5 * 60 * 1000 },
-  { label: "Last 15 Minutes", value: 15, milliseconds: 15 * 60 * 1000 },
-  { label: "Last 30 Minutes", value: 30, milliseconds: 30 * 60 * 1000 },
-  { label: "Last 1 Hour", value: 60, milliseconds: 60 * 60 * 1000 },
-  { label: "Last 3 Hours", value: 180, milliseconds: 180 * 60 * 1000 },
-  { label: "Last 6 Hours", value: 360, milliseconds: 360 * 60 * 1000 },
-  { label: "Last 12 Hours", value: 720, milliseconds: 720 * 60 * 1000 },
-  { label: "Last 24 Hours", value: 1440, milliseconds: 1440 * 60 * 1000 },
-];
 
 const COLORS = {
   current: "#00f5d4",
@@ -40,19 +28,9 @@ const COLORS = {
 };
 
 export default function Charts({ data }) {
-  const [duration, setDuration] = useState(DEFAULT_DURATION);
   const [showAnalysis, setShowAnalysis] = useState(DEFAULT_SHOW_ANALYSIS);
-  const [currentTime, setCurrentTime] = useState(Date.now());
 
-  // Update current time every second for real-time display
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentTime(Date.now());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Process data with proper timestamp handling
+  // Process all data (no time window filtering)
   const processedData = useMemo(() => {
     if (!Array.isArray(data) || data.length === 0) return [];
     
@@ -61,7 +39,7 @@ export default function Charts({ data }) {
     const processed = data
       .filter(d => d && d.TS)
       .map(d => {
-        // Ensure timestamp is a number (handle both string and number)
+        // Ensure timestamp is a number
         let timestamp = Number(d.TS);
         if (isNaN(timestamp)) {
           timestamp = new Date(d.TS).getTime();
@@ -117,45 +95,23 @@ export default function Charts({ data }) {
     return processed;
   }, [data]);
 
-  // FIXED: Filter data by selected time window
-  const filteredData = useMemo(() => {
-    if (processedData.length === 0) return [];
-    
-    // Get the latest timestamp from data (not current system time)
-    const latestDataTimestamp = processedData[processedData.length - 1].timestamp;
-    
-    // Calculate cutoff time based on selected duration
-    const cutoffTime = latestDataTimestamp - (duration * 60 * 1000);
-    
-    console.log("Filtering - Duration:", duration, "minutes");
-    console.log("Latest data time:", new Date(latestDataTimestamp));
-    console.log("Cutoff time:", new Date(cutoffTime));
-    
-    // Filter data points within the time window
-    const filtered = processedData.filter(d => d.timestamp >= cutoffTime);
-    
-    console.log("Filtered data points:", filtered.length, "out of", processedData.length);
-    
-    return filtered;
-  }, [processedData, duration]);
-
   // Calculate statistics for display
   const stats = useMemo(() => {
-    if (filteredData.length === 0) return {};
+    if (processedData.length === 0) return {};
     
-    const latest = filteredData[filteredData.length - 1];
-    const avgCurrent = filteredData.reduce((sum, d) => sum + d.current, 0) / filteredData.length;
-    const maxCurrent = Math.max(...filteredData.map(d => d.current));
-    const minCurrent = Math.min(...filteredData.map(d => d.current));
+    const latest = processedData[processedData.length - 1];
+    const avgCurrent = processedData.reduce((sum, d) => sum + d.current, 0) / processedData.length;
+    const maxCurrent = Math.max(...processedData.map(d => d.current));
+    const minCurrent = Math.min(...processedData.map(d => d.current));
     
-    const avgTemp = filteredData.reduce((sum, d) => sum + d.temperature, 0) / filteredData.length;
-    const maxTemp = Math.max(...filteredData.map(d => d.temperature));
-    const minTemp = Math.min(...filteredData.map(d => d.temperature));
+    const avgTemp = processedData.reduce((sum, d) => sum + d.temperature, 0) / processedData.length;
+    const maxTemp = Math.max(...processedData.map(d => d.temperature));
+    const minTemp = Math.min(...processedData.map(d => d.temperature));
     
-    const avgFlowDiff = filteredData.reduce((sum, d) => sum + d.flowDiff, 0) / filteredData.length;
-    const maxFlowDiff = Math.max(...filteredData.map(d => d.flowDiff));
+    const avgFlowDiff = processedData.reduce((sum, d) => sum + d.flowDiff, 0) / processedData.length;
+    const maxFlowDiff = Math.max(...processedData.map(d => d.flowDiff));
     
-    const avgLoad = filteredData.reduce((sum, d) => sum + d.load, 0) / filteredData.length;
+    const avgLoad = processedData.reduce((sum, d) => sum + d.load, 0) / processedData.length;
     
     return { 
       latest, 
@@ -163,13 +119,13 @@ export default function Charts({ data }) {
       avgTemp, maxTemp, minTemp,
       avgFlowDiff, maxFlowDiff,
       avgLoad,
-      dataPoints: filteredData.length,
+      dataPoints: processedData.length,
       timeRange: {
-        start: filteredData[0]?.date,
-        end: filteredData[filteredData.length - 1]?.date
+        start: processedData[0]?.date,
+        end: processedData[processedData.length - 1]?.date
       }
     };
-  }, [filteredData]);
+  }, [processedData]);
 
   // Show loading state
   if (processedData.length === 0) {
@@ -184,32 +140,13 @@ export default function Charts({ data }) {
     );
   }
 
-  // Show message if no data in selected time window
-  if (filteredData.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-96 bg-gray-900 rounded-xl">
-        <div className="text-center text-gray-400">
-          <div className="text-6xl mb-4">⏱️</div>
-          <p className="text-lg">No data in selected time window</p>
-          <p className="text-sm mt-2">Try increasing the time range</p>
-          <button 
-            onClick={() => setDuration(1440)}
-            className="mt-4 px-4 py-2 bg-blue-500/20 rounded-lg text-blue-400 text-sm"
-          >
-            Show Last 24 Hours
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  const insights = calculateInsights(filteredData, stats);
+  const insights = calculateInsights(processedData, stats);
 
   return (
     <div className="min-h-screen bg-gray-900 p-4 md:p-6">
       <div className="max-w-7xl mx-auto space-y-6">
         
-        {/* Header with Time Window Info */}
+        {/* Header */}
         <div className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-xl p-5 border border-white/10 backdrop-blur">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
@@ -217,26 +154,15 @@ export default function Charts({ data }) {
                 📈 Industrial Monitoring Dashboard
               </h3>
               <p className="text-gray-400 text-sm mt-1">
-                Showing {filteredData.length} data points from {stats.timeRange?.start?.toLocaleTimeString()} to {stats.timeRange?.end?.toLocaleTimeString()}
+                {processedData.length} data points | {stats.timeRange?.start?.toLocaleDateString()} {stats.timeRange?.start?.toLocaleTimeString()} - {stats.timeRange?.end?.toLocaleTimeString()}
               </p>
             </div>
-            <div className="flex gap-3 flex-wrap">
-              <select
-                value={duration}
-                onChange={(e) => setDuration(Number(e.target.value))}
-                className="px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm cursor-pointer hover:bg-gray-700 transition"
-              >
-                {TIME_WINDOWS.map(w => (
-                  <option key={w.value} value={w.value}>{w.label}</option>
-                ))}
-              </select>
-              <button
-                onClick={() => setShowAnalysis(!showAnalysis)}
-                className="px-4 py-2 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 text-sm hover:bg-purple-500/30 transition"
-              >
-                {showAnalysis ? "📊 Hide Analysis" : "🔍 Show Analysis"}
-              </button>
-            </div>
+            <button
+              onClick={() => setShowAnalysis(!showAnalysis)}
+              className="px-4 py-2 rounded-lg bg-purple-500/20 border border-purple-500/30 text-purple-300 text-sm hover:bg-purple-500/30 transition"
+            >
+              {showAnalysis ? "📊 Hide Analysis" : "🔍 Show Analysis"}
+            </button>
           </div>
         </div>
 
@@ -291,7 +217,7 @@ export default function Charts({ data }) {
             <h4 className="font-bold text-green-400 mb-4 flex items-center gap-2">
               <span className="text-xl">🔍</span> Real-Time Analysis Insights
               <span className="text-xs text-gray-500 ml-2 font-normal">
-                (Based on {filteredData.length} data points in selected window)
+                (Based on {processedData.length} data points)
               </span>
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -333,16 +259,16 @@ export default function Charts({ data }) {
           {/* Current Chart */}
           <ChartCard title="⚡ Current Draw" unit="Amperes (A)">
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <LineChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+              <LineChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis 
                   dataKey="time" 
                   stroke="#9ca3af" 
                   tick={{ fontSize: 11 }} 
                   interval="preserveStartEnd"
-                  angle={duration <= 60 ? 0 : -45}
-                  textAnchor={duration <= 60 ? "middle" : "end"}
-                  height={duration <= 60 ? 30 : 60}
+                  angle={processedData.length > 20 ? -45 : 0}
+                  textAnchor={processedData.length > 20 ? "end" : "middle"}
+                  height={processedData.length > 20 ? 60 : 30}
                 />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
                 <Tooltip 
@@ -361,7 +287,7 @@ export default function Charts({ data }) {
           {/* Temperature Chart */}
           <ChartCard title="🌡️ Temperature" unit="Degrees Celsius (°C)">
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <LineChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+              <LineChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
@@ -380,7 +306,7 @@ export default function Charts({ data }) {
           {/* Flow Comparison Chart */}
           <ChartCard title="🚰 Flow Rates Comparison" unit="Liters per Minute (L/min)">
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <BarChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+              <BarChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
@@ -398,7 +324,7 @@ export default function Charts({ data }) {
           {/* Flow Difference Chart */}
           <ChartCard title="📊 Flow Difference (Leakage Detection)" unit="Liters per Minute (L/min)">
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <ComposedChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+              <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} domain={[0, 'auto']} />
@@ -417,7 +343,7 @@ export default function Charts({ data }) {
           {/* Pump Load/Efficiency Chart */}
           <ChartCard title="⚙️ Pump Efficiency" unit="Load Factor (Flow/Current)">
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <LineChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+              <LineChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} domain={[0, 2]} />
@@ -436,7 +362,7 @@ export default function Charts({ data }) {
           {/* Tank Height Chart */}
           <ChartCard title="🛢️ Tank Level" unit="Meters (m)">
             <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-              <ComposedChart data={filteredData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
+              <ComposedChart data={processedData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="time" stroke="#9ca3af" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} domain={[0, 'auto']} />
